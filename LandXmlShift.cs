@@ -5,82 +5,62 @@ using System.Xml.Linq;
 
 public static class LandXmlShift
 {
-    // Easting shift only
-    private const double EastingShift = -32000000.0;
+    private const double Shift = -32000000.0;
 
     public static void Convert(string inputPath, string outputPath)
     {
         XDocument xml = XDocument.Load(inputPath);
 
-        Fix2DLists(xml);
-        Fix3DLists(xml);
-        FixCoordGeom(xml);
+        ProcessNodeLists(xml, "PntList2D", 2);
+        ProcessNodeLists(xml, "PntList3D", 3);
+        ProcessSimpleNodes(xml);
         UpdateCoordinateSystemNode(xml);
 
         xml.Save(outputPath);
     }
 
-    // ---- FIX PntList2D ----
-    private static void Fix2DLists(XDocument xml)
+    private static void ProcessNodeLists(XDocument xml, string elementName, int dim)
     {
-        var nodes = xml.Descendants().Where(n => n.Name.LocalName == "PntList2D");
+        var nodes = xml.Descendants().Where(n => n.Name.LocalName == elementName);
 
         foreach (var n in nodes)
         {
             var parts = n.Value
-                .Trim()
-                .Split(new[] { ' ', '\t', '\n', '\r' },
-                       StringSplitOptions.RemoveEmptyEntries);
+                .Split(new[] { ' ', '\n', '\r', '\t' },
+                StringSplitOptions.RemoveEmptyEntries);
 
-            for (int i = 0; i < parts.Length; i += 2)
+            for (int i = 0; i < parts.Length; i += dim)
             {
-                // ALWAYS assume LandXML = (northing, easting)
-                double north = double.Parse(parts[i], CultureInfo.InvariantCulture);
-                double east  = double.Parse(parts[i + 1], CultureInfo.InvariantCulture);
+                double a = double.Parse(parts[i], CultureInfo.InvariantCulture);
+                double b = double.Parse(parts[i + 1], CultureInfo.InvariantCulture);
 
-                // Apply ONLY to Easting (the 32… million number)
-                east += EastingShift;
+                double north, east;
 
+                // Detect which is Easting by its magnitude:
+                if (a > b)
+                {
+                    east = a; north = b;
+                }
+                else
+                {
+                    north = a; east = b;
+                }
+
+                // Apply shift ONLY to Easting:
+                east += Shift;
+
+                // Write them back maintaining N E order:
                 parts[i]     = north.ToString("F3", CultureInfo.InvariantCulture);
                 parts[i + 1] = east.ToString("F3", CultureInfo.InvariantCulture);
+
+                // keep Z unchanged if dim == 3
             }
 
             n.Value = string.Join(" ", parts);
         }
     }
 
-    // ---- FIX PntList3D ----
-    private static void Fix3DLists(XDocument xml)
-    {
-        var nodes = xml.Descendants().Where(n => n.Name.LocalName == "PntList3D");
-
-        foreach (var n in nodes)
-        {
-            var parts = n.Value
-                .Trim()
-                .Split(new[] { ' ', '\t', '\n', '\r' },
-                       StringSplitOptions.RemoveEmptyEntries);
-
-            for (int i = 0; i < parts.Length; i += 3)
-            {
-                double north = double.Parse(parts[i], CultureInfo.InvariantCulture);
-                double east  = double.Parse(parts[i + 1], CultureInfo.InvariantCulture);
-                double z     = double.Parse(parts[i + 2], CultureInfo.InvariantCulture);
-
-                // Shift only easting
-                east += EastingShift;
-
-                parts[i]     = north.ToString("F3", CultureInfo.InvariantCulture);
-                parts[i + 1] = east.ToString("F3", CultureInfo.InvariantCulture);
-                parts[i + 2] = z.ToString("F3", CultureInfo.InvariantCulture);
-            }
-
-            n.Value = string.Join(" ", parts);
-        }
-    }
-
-    // ---- FIX <Start>, <End>, <PI>, <Center>, etc ----
-    private static void FixCoordGeom(XDocument xml)
+    private static void ProcessSimpleNodes(XDocument xml)
     {
         var nodes = xml.Descendants().Where(n =>
             n.Name.LocalName == "Start" ||
@@ -92,17 +72,20 @@ public static class LandXmlShift
 
         foreach (var n in nodes)
         {
-            var parts = n.Value
-                .Trim()
-                .Split(new[] { ' ', '\t', '\n', '\r' },
-                       StringSplitOptions.RemoveEmptyEntries);
+            var parts = n.Value.Split(new[] { ' ', '\n', '\r', '\t' },
+                                      StringSplitOptions.RemoveEmptyEntries);
 
             if (parts.Length < 2) continue;
 
-            double north = double.Parse(parts[0], CultureInfo.InvariantCulture);
-            double east  = double.Parse(parts[1], CultureInfo.InvariantCulture);
+            double a = double.Parse(parts[0], CultureInfo.InvariantCulture);
+            double b = double.Parse(parts[1], CultureInfo.InvariantCulture);
 
-            east += EastingShift;
+            double north, east;
+
+            if (a > b) { east = a; north = b; }
+            else       { north = a; east = b; }
+
+            east += Shift;
 
             parts[0] = north.ToString("F3", CultureInfo.InvariantCulture);
             parts[1] = east.ToString("F3", CultureInfo.InvariantCulture);
