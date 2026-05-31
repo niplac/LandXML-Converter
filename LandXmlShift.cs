@@ -5,8 +5,10 @@ using System.Xml.Linq;
 
 public static class LandXmlShift
 {
-    private const double ShiftX = -32000000.0;
-    private const double ShiftY = 0.0;
+    // LandXML uses (Northing, Easting) order.
+    // Easting needs shift of -32,000,000 to convert to EPSG:25832.
+    private const double EastingShift = -32000000.0;
+    private const double NorthingShift = 0.0;
 
     public static void Convert(string inputPath, string outputPath)
     {
@@ -20,62 +22,79 @@ public static class LandXmlShift
         xml.Save(outputPath);
     }
 
+    // Handles <PntList2D> and <PntList3D>
     private static void ShiftPntList(XDocument xml, string tag, int dim)
     {
         var nodes = xml.Descendants().Where(n => n.Name.LocalName == tag);
 
         foreach (var n in nodes)
         {
-            var parts = n.Value.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var parts = n.Value.Trim()
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
             for (int i = 0; i < parts.Length; i += dim)
             {
-                double x = double.Parse(parts[i], CultureInfo.InvariantCulture);
-                double y = double.Parse(parts[i + 1], CultureInfo.InvariantCulture);
+                // LandXML: parts[i] = Northing, parts[i+1] = Easting
+                double north = double.Parse(parts[i], CultureInfo.InvariantCulture);
+                double east  = double.Parse(parts[i + 1], CultureInfo.InvariantCulture);
 
-                x += ShiftX;
-                y += ShiftY;
+                // Apply shift ONLY to easting
+                east += EastingShift;
+                north += NorthingShift;
 
-                parts[i] = x.ToString("F3", CultureInfo.InvariantCulture);
-                parts[i + 1] = y.ToString("F3", CultureInfo.InvariantCulture);
+                // Write back in correct N E order
+                parts[i]     = north.ToString("F3", CultureInfo.InvariantCulture);
+                parts[i + 1] = east.ToString("F3", CultureInfo.InvariantCulture);
+
+                // If 3D, keep Z exactly as is
+                if (dim == 3)
+                {
+                    // parts[i + 2] stays unchanged (Z)
+                }
             }
 
             n.Value = string.Join(" ", parts);
         }
     }
 
+    // Handles <Start>, <End>, <Center>, <PI>, <Pnt>
     private static void ShiftCoordGeom(XDocument xml)
     {
         var nodes = xml.Descendants().Where(n =>
-            n.Name.LocalName == "Start" ||
-            n.Name.LocalName == "End" ||
+            n.Name.LocalName == "Start"  ||
+            n.Name.LocalName == "End"    ||
             n.Name.LocalName == "Center" ||
-            n.Name.LocalName == "PI" ||
+            n.Name.LocalName == "PI"     ||
             n.Name.LocalName == "Pnt"
         );
 
         foreach (var n in nodes)
         {
-            var parts = n.Value.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var parts = n.Value.Trim()
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
             if (parts.Length < 2)
                 continue;
 
-            double x = double.Parse(parts[0], CultureInfo.InvariantCulture);
-            double y = double.Parse(parts[1], CultureInfo.InvariantCulture);
+            double north = double.Parse(parts[0], CultureInfo.InvariantCulture);
+            double east  = double.Parse(parts[1], CultureInfo.InvariantCulture);
 
-            x += ShiftX;
-            y += ShiftY;
+            east  += EastingShift;
+            north += NorthingShift;
 
-            parts[0] = x.ToString("F3", CultureInfo.InvariantCulture);
-            parts[1] = y.ToString("F3", CultureInfo.InvariantCulture);
+            parts[0] = north.ToString("F3", CultureInfo.InvariantCulture);
+            parts[1] = east.ToString("F3", CultureInfo.InvariantCulture);
 
             n.Value = string.Join(" ", parts);
         }
     }
 
+    // Updates the coordinate system metadata to EPSG:25832
     private static void UpdateCoordinateSystemNode(XDocument xml)
     {
-        var cs = xml.Descendants().FirstOrDefault(n => n.Name.LocalName == "CoordinateSystem");
+        var cs = xml.Descendants()
+                    .FirstOrDefault(n => n.Name.LocalName == "CoordinateSystem");
+
         if (cs == null) return;
 
         cs.SetAttributeValue("desc", "ETRS89 / UTM zone 32N (EPSG:25832)");
