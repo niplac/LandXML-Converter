@@ -5,53 +5,56 @@ using System.Xml.Linq;
 
 public static class LandXmlShift
 {
-    private const double Shift = -32000000.0;
+    // Easting offset to remove the m32 false easting
+    private const double EastingShift = -32000000.0;
 
     public static void Convert(string inputPath, string outputPath)
     {
         XDocument xml = XDocument.Load(inputPath);
 
-        ShiftList(xml, "PntList2D", 2);
-        ShiftList(xml, "PntList3D", 3);
-        ShiftSimpleNodes(xml);
-        UpdateCoordinateSystemNode(xml);
+        FixCoordLists(xml, "PntList2D", 2);
+        FixCoordLists(xml, "PntList3D", 3);
+        FixCoordNodes(xml);
+        FixCoordinateSystemMeta(xml);
 
         xml.Save(outputPath);
     }
 
-    private static void ShiftList(XDocument xml, string tag, int dim)
+    // ==============================
+    // 1. FIXING PntList2D & PntList3D
+    // ==============================
+    private static void FixCoordLists(XDocument xml, string tag, int dim)
     {
         var nodes = xml.Descendants().Where(n => n.Name.LocalName == tag);
 
         foreach (var n in nodes)
         {
             var parts = n.Value
-                .Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                .Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
 
             for (int i = 0; i < parts.Length; i += dim)
             {
-                double a = double.Parse(parts[i], CultureInfo.InvariantCulture);
-                double b = double.Parse(parts[i + 1], CultureInfo.InvariantCulture);
+                double v1 = double.Parse(parts[i], CultureInfo.InvariantCulture);
+                double v2 = double.Parse(parts[i + 1], CultureInfo.InvariantCulture);
 
+                // Detect Easting by magnitude
                 double north, east;
-
-                // If first value is EASTING (32 million), swap:
-                if (a > b)
+                if (v1 > v2)
                 {
-                    east = a;
-                    north = b;
+                    east = v1;
+                    north = v2;
                 }
                 else
                 {
-                    north = a;
-                    east = b;
+                    north = v1;
+                    east = v2;
                 }
 
-                // Apply only to EASTING
-                east += Shift;
+                // Apply ONLY to Easting
+                east += EastingShift;
 
-                // Write N E back
-                parts[i] = north.ToString("F3", CultureInfo.InvariantCulture);
+                // Write back in (N, E) order
+                parts[i]     = north.ToString("F3", CultureInfo.InvariantCulture);
                 parts[i + 1] = east.ToString("F3", CultureInfo.InvariantCulture);
             }
 
@@ -59,42 +62,41 @@ public static class LandXmlShift
         }
     }
 
-    private static void ShiftSimpleNodes(XDocument xml)
+    // ==============================
+    // 2. FIXING Start/End/PI/Pnt nodes
+    // ==============================
+    private static void FixCoordNodes(XDocument xml)
     {
-        var nodes = xml.Descendants().Where(n =>
-            n.Name.LocalName == "Start" ||
-            n.Name.LocalName == "End" ||
-            n.Name.LocalName == "Center" ||
-            n.Name.LocalName == "PI" ||
-            n.Name.LocalName == "Pnt"
-        );
+        var nodes = xml.Descendants()
+            .Where(n => n.Name.LocalName == "Start"
+                     || n.Name.LocalName == "End"
+                     || n.Name.LocalName == "Center"
+                     || n.Name.LocalName == "PI"
+                     || n.Name.LocalName == "Pnt");
 
         foreach (var n in nodes)
         {
             var parts = n.Value
-                .Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                .Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
 
-            if (parts.Length < 2)
-                continue;
+            if (parts.Length < 2) continue;
 
-            double a = double.Parse(parts[0], CultureInfo.InvariantCulture);
-            double b = double.Parse(parts[1], CultureInfo.InvariantCulture);
+            double v1 = double.Parse(parts[0], CultureInfo.InvariantCulture);
+            double v2 = double.Parse(parts[1], CultureInfo.InvariantCulture);
 
             double north, east;
-
-            // swap if first value is larger than second
-            if (a > b)
+            if (v1 > v2)
             {
-                east = a;
-                north = b;
+                east = v1;
+                north = v2;
             }
             else
             {
-                north = a;
-                east = b;
+                north = v1;
+                east = v2;
             }
 
-            east += Shift;
+            east += EastingShift;
 
             parts[0] = north.ToString("F3", CultureInfo.InvariantCulture);
             parts[1] = east.ToString("F3", CultureInfo.InvariantCulture);
@@ -103,13 +105,22 @@ public static class LandXmlShift
         }
     }
 
-    private static void UpdateCoordinateSystemNode(XDocument xml)
+    // ==============================
+    // 3. CIVIL 3D SAFE METADATA FIX
+    // ==============================
+    private static void FixCoordinateSystemMeta(XDocument xml)
     {
         var cs = xml.Descendants().FirstOrDefault(n => n.Name.LocalName == "CoordinateSystem");
         if (cs == null) return;
 
-        cs.SetAttributeValue("desc", "ETRS89 / UTM zone 32N (EPSG:25832)");
-        cs.SetAttributeValue("horizontalCoordinateSystemName", "EPSG:25832");
-        cs.SetAttributeValue("horizontalDatum", "ETRS89");
+        // Remove all old attributes (to avoid Civil 3D auto transforming)
+        cs.RemoveAttributes();
+
+        // Civil 3D SAFE VERSION:
+        // DO NOT PROVIDE WKT!
+        // Civil 3D will ignore WKT and trust the drawing's coordinate system.
+        cs.SetAttributeValue("desc", "NONE");
+        cs.SetAttributeValue("horizontalDatum", "NONE");
+        cs.SetAttributeValue("horizontalCoordinateSystemName", "NONE");
     }
 }
