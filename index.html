@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>LandXML Batch Converter</title>
+</head>
+<body>
+  <h2>LandXML Batch Converter (4647 → EPSG:25832)</h2>
+
+  <input id="fileInput" type="file" multiple accept=".xml">
+  <br><br>
+
+  <button onclick="uploadFiles()">Convert Files</button>
+
+  <p id="status"></p>
+
+  <script>
+    async function uploadFiles() {
+      const files = document.getElementById("fileInput").files;
+      if (files.length === 0) {
+        alert("Please select at least one LandXML file.");
+        return;
+      }
+
+      const form = new FormData();
+      for (let f of files) form.append("files", f);
+
+      document.getElementById("status").innerText = "Uploading and converting...";
+
+      const response = await fetch("/convert", {
+        method: "POST",
+        body: form
+      });
+
+      if (!response.ok) {
+        document.getElementById("status").innerText = "Error during conversion.";
+        return;
+      }
+
+      document.getElementById("status").innerText = "Download ready.";
+
+      const blob = await response.blob();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "Converted_LandXML.zip";
+      link.click();
+    }
+  </script>
+</body>
+</html>
